@@ -14,6 +14,16 @@ $env:UV_PROJECT_ENVIRONMENT = "$env:LOCALAPPDATA\venvs\virtaal-review"; uv run v
 
 Without a path, it asks for the file.
 
+## As a dependency
+
+Another project can install it from git; the wheel then carries its own copy
+of Virtaal's `virtaal/` package and Finnish catalog:
+
+```toml
+[tool.uv.sources]
+virtaal-review = { git = "https://github.com/Hpartanen/virtaal", subdirectory = "review", rev = "<sha>" }
+```
+
 ## What it does
 
 - **Approve** (Hyväksy, Ctrl+Enter) writes `state="signed-off"` and moves to
