@@ -6,13 +6,14 @@ A small Tkinter window for reviewing one XLIFF 1.2 file on Virtaal's core
 
 ## Start
 
-From this folder, with the environment outside any synced folder:
+From any folder, with the environment kept outside any synced folder
+(replace `<checkout>` with the path of this repository):
 
 ```powershell
-$env:UV_PROJECT_ENVIRONMENT = "$env:LOCALAPPDATA\venvs\virtaal-review"; uv run virtaal-review path\to\review.xliff
+$env:UV_PROJECT_ENVIRONMENT = "$env:LOCALAPPDATA\venvs\virtaal-review"; uv run --project "<checkout>\review" virtaal-review
 ```
 
-Without a path, it asks for the file.
+It asks for the file; a path to an `.xliff` can also be given at the end.
 
 ## As a dependency
 
