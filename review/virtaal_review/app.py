@@ -4,7 +4,7 @@ All file and state logic is in `session`; this module only shows it and
 turns keys into calls. Saving happens shortly after each change, on Ctrl+S
 and on close.
 """
-import sys
+import argparse
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -234,8 +234,11 @@ class ReviewWindow:
 
 
 def main():
+    parser = argparse.ArgumentParser(prog="virtaal-review", description="Tarkasta XLIFF 1.2 -tiedoston käännökset.")
+    parser.add_argument("file", nargs="?", help="tarkastettava XLIFF-tiedosto; ilman sitä ikkuna kysyy tiedoston")
+    args = parser.parse_args()
     root = tk.Tk()
-    path = sys.argv[1] if len(sys.argv) > 1 else filedialog.askopenfilename(
+    path = args.file or filedialog.askopenfilename(
         title="Avaa tarkastettava XLIFF", filetypes=[("XLIFF", "*.xliff *.xlf"), ("Kaikki", "*.*")])
     if not path:
         return

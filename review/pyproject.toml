@@ -17,11 +17,18 @@ virtaal-review = "virtaal_review.app:main"
 dev = ["pytest==9.1.1"]
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.packages.find]
-include = ["virtaal_review*"]
+# An installed copy has no checkout around it, so the wheel carries
+# Virtaal's own package and Finnish catalog, taken from this repository
+# at build time (a git install clones the whole repository).
+[tool.hatch.build.targets.wheel]
+packages = ["virtaal_review"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../virtaal" = "virtaal"
+"../po/fi.po" = "virtaal_review/fi.po"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
