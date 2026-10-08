@@ -14,6 +14,7 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from . import theme
 from .session import APPROVED, OPEN, REJECTED, RefusedFile, ReviewSession, plain, state_names
 
 AUTOSAVE_MS = 1500
@@ -69,6 +70,13 @@ class ReviewWindow:
         self.together = tk.BooleanVar()
         ttk.Checkbutton(bar, text="Toistot yhdessä", variable=self.together,
                         command=self.toggle_together).pack(side="left", padx=(0, 12))
+        self.theme_choice = theme.load_choice()
+        self.theme_name = tk.StringVar(value=next(k for k, v in theme.CHOICES.items() if v == self.theme_choice))
+        themes = ttk.Combobox(bar, textvariable=self.theme_name, values=list(theme.CHOICES), state="readonly",
+                              width=12)
+        themes.pack(side="right")
+        themes.bind("<<ComboboxSelected>>", lambda _: self.choose_theme())
+        ttk.Label(bar, text="Teema:").pack(side="right", padx=(12, 4))
         self.show_list = tk.BooleanVar(value=True)
         self.show_notes = tk.BooleanVar(value=True)
         ttk.Checkbutton(bar, text="Näytä huomautukset", variable=self.show_notes,
@@ -101,7 +109,7 @@ class ReviewWindow:
         scroll.pack(side="right", fill="y")
         self.list.bind("<<TreeviewSelect>>", self.on_select)
         self.list.bind("<Control-a>", lambda _: (self.list.selection_set(self.list.get_children()), "break")[1])
-        panes.add(left, weight=1)
+        panes.add(left, weight=2)
 
         right = ttk.Frame(panes)
         # Source and translation side by side, in equal columns.
@@ -126,7 +134,7 @@ class ReviewWindow:
         ttk.Button(buttons, textvariable=self.reject_label, command=self.reject).pack(side="left", padx=6)
         ttk.Button(buttons, text="Seuraava (Ctrl+↓)", command=lambda: self.step(1)).pack(side="right")
         ttk.Button(buttons, text="Edellinen (Ctrl+↑)", command=lambda: self.step(-1)).pack(side="right", padx=6)
-        panes.add(right, weight=1)
+        panes.add(right, weight=3)
 
         self.status = ttk.Label(root, padding=(8, 0, 8, 6), anchor="w")
         self.status.pack(fill="x")
@@ -139,6 +147,7 @@ class ReviewWindow:
             for widget in (root, self.target, self.list):
                 widget.bind(key, lambda event, action=action: (action(), "break")[1])
 
+        theme.apply(root, self.theme_choice, [self.target], [self.source, self.notes])
         self.fill_list()
         self.set_status(f"Varmuuskopio: {session.backup_path}")
         self.target.focus_set()
@@ -149,7 +158,7 @@ class ReviewWindow:
         text = tk.Text(parent, width=1, height=height, wrap="word", undo=not readonly, font=("Segoe UI", 11))
         text.pack(fill="both", expand=expand)
         if readonly:
-            text.configure(state="disabled", background=self.root.cget("background"))
+            text.configure(state="disabled")
         return text
 
     # The list
@@ -246,10 +255,15 @@ class ReviewWindow:
             self.similar = None
         self.fill_list()
 
+    def choose_theme(self):
+        self.theme_choice = theme.CHOICES[self.theme_name.get()]
+        theme.save_choice(self.theme_choice)
+        theme.apply(self.root, self.theme_choice, [self.target], [self.source, self.notes])
+
     def toggle_list(self):
         # A hidden list still holds the order, so Ctrl+arrows keep working.
         if self.show_list.get():
-            self.panes.insert(0, self.left, weight=1)
+            self.panes.insert(0, self.left, weight=2)
         else:
             self.panes.forget(self.left)
 

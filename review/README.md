@@ -45,6 +45,9 @@ virtaal-review = { git = "https://github.com/Hpartanen/virtaal", subdirectory = 
   are. A plain-text source and a rich-text one with the same visible text are
   not repeats of each other.
 - The list and the notes can be hidden.
+- **Teema**: light, dark or the system's choice (the default), on the Sun
+  Valley ttk theme (sv-ttk). The choice is kept in `virtaal-review.json`
+  beside Virtaal's own settings.
 - **Line breaks** show as plain line breaks and are written back in the
   form the source uses (CR, CRLF or LF; CR when the source has none). A file
   with CRs outside `xml:space="preserve"` is refused, since translate-toolkit
