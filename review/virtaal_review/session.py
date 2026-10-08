@@ -11,11 +11,14 @@ States, as XLIFF writes them:
   rejected  state="needs-translation" (NEEDS_WORK, "Keskeneräinen"), target kept.
   open      anything else; an edited target becomes state="translated".
 """
+import html
 import os
+import re
 import shutil
 import tempfile
 import time
 import types
+from difflib import SequenceMatcher
 
 from lxml import etree
 from translate.storage.workflow import StateEnum
@@ -98,6 +101,30 @@ def to_display(text):
     return (text or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
+def plain(text):
+    """The text a reader sees, on one line: rich-text markup dropped."""
+    text = to_display(text)
+    if text.lstrip().startswith("<") or "<?xml" in text:
+        text = html.unescape(re.sub(r"<[^>]*>", "", text))
+    return " ".join(text.split())
+
+
+def pattern(text):
+    """plain() in lower case with every number as #, so '12 x 20' and '14 x 20' match."""
+    return re.sub(r"\d+(?:[.,]\d+)?", "#", plain(text).casefold())
+
+
+SIMILARITY = 0.7  # SequenceMatcher ratio of two patterns; a judgment call, not measured
+
+
+def similar(a, b):
+    """Whether two patterns are alike enough to review together."""
+    if a == b:
+        return True
+    m = SequenceMatcher(None, a, b)
+    return m.real_quick_ratio() >= SIMILARITY and m.quick_ratio() >= SIMILARITY and m.ratio() >= SIMILARITY
+
+
 class ReviewSession:
     def __init__(self, path):
         self.path = os.path.abspath(path)
@@ -105,6 +132,14 @@ class ReviewSession:
         self.backup_path = self._backup()
         self.model = StoreModel(self.path, None)
         self.units = self.model.get_units()
+        # Sources never change, so their list forms are worked out once.
+        self.source_plain = [plain(u.source) for u in self.units]
+        self.source_pattern = [pattern(u.source) for u in self.units]
+        # Strings with exactly the same source: each entry lists the whole group.
+        groups = {}
+        for i, u in enumerate(self.units):
+            groups.setdefault(u.source, []).append(i)
+        self.repeats = [groups[u.source] for u in self.units]
         self.dirty = False
         self.saved_at = None
 
@@ -121,6 +156,10 @@ class ReviewSession:
 
     def source(self, i):
         return to_display(self.units[i].source)
+
+    def similar_to(self, i):
+        """The strings whose source is like string i's, i itself included."""
+        return {j for j, p in enumerate(self.source_pattern) if similar(self.source_pattern[i], p)}
 
     def target(self, i):
         return to_display(self.units[i].target)
@@ -157,6 +196,13 @@ class ReviewSession:
         unit.set_state_n(unit.S_TRANSLATED if text else unit.S_UNTRANSLATED)
         self.dirty = True
         return True
+
+    def copy_to_repeats(self, i):
+        """Give string i's translation to the other strings with the same source.
+
+        Returns the strings that changed; as with any edit, they become open.
+        """
+        return [j for j in self.repeats[i] if j != i and self.set_target(j, self.target(i))]
 
     def approve(self, i):
         """Sign the string off; an empty target cannot be approved."""

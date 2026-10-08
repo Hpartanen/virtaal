@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from virtaal_review.session import APPROVED, OPEN, REJECTED, RefusedFile, ReviewSession, state_names
+from virtaal_review.session import APPROVED, OPEN, REJECTED, RefusedFile, ReviewSession, pattern, plain, state_names
 
 HEAD = '<?xml version="1.0" encoding="UTF-8"?>\n<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">\n'
 FILE = '<file original="t" source-language="sv" target-language="fi" datatype="plaintext"><body>\n'
@@ -134,3 +134,36 @@ def test_untouched_units_round_trip(basic):
 def test_virtaal_state_names_are_finnish():
     names = state_names()
     assert names[120] == "Tarkastettu" and names[30] == "Keskeneräinen"
+
+
+def test_plain_drops_rich_text_markup():
+    rich = '<?xml version="1.0"?><body xmlns="http://www.w3.org/1999/xhtml" style="a:b"><p>Rad &amp;\r1</p></body>'
+    assert plain(rich) == "Rad & 1"
+    assert plain("a < b\nc") == "a < b c"
+
+
+def test_similar_sources_are_found_together(tmp_path):
+    path = write(tmp_path, [unit("a", "12 x 20"), unit("b", "14,5 X 20"), unit("c", "Datum Target Symbol"),
+                            unit("d", "Datum Feature Symbol"), unit("e", "Ventil")])
+    s = ReviewSession(path)
+    assert pattern("14,5 X 20") == pattern("12 x 20") == "# x #"
+    assert s.similar_to(0) == {0, 1}
+    assert s.similar_to(2) == {2, 3}
+    assert s.similar_to(4) == {4}
+
+
+def test_copy_to_repeats(tmp_path):
+    path = write(tmp_path, [unit("a", "Ventil", "Venttiili"), unit("b", "Kanal", "Kanava"),
+                            unit("c", "Ventil", "Venttiili"), unit("d", "Ventil")])
+    s = ReviewSession(path)
+    assert s.repeats[0] == s.repeats[2] == [0, 2, 3] and s.repeats[1] == [1]
+    s.approve(2)
+    s.set_target(0, "Venttiilit")
+    assert s.copy_to_repeats(0) == [2, 3]
+    assert [s.target(i) for i in (2, 3)] == ["Venttiilit", "Venttiilit"]
+    assert s.kind(2) == OPEN  # the copy is an edit, so the approval is gone
+    assert s.copy_to_repeats(0) == []
+
+
+def test_plain_finds_markup_after_a_prefix():
+    assert plain('[x] <?xml version="1.0"?><body xmlns="http://www.w3.org/1999/xhtml">A</body>') == "[x] A"
