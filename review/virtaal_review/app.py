@@ -18,6 +18,7 @@ from . import theme
 from .session import APPROVED, OPEN, REJECTED, RefusedFile, ReviewSession, plain, state_names
 
 AUTOSAVE_MS = 1500
+MIN_SIZE = (1000, 560)
 SEARCH_DELAY_MS = 250
 FILTERS = [("Kaikki", None), ("Avoimet", OPEN), ("Hyväksytyt", APPROVED), ("Hylätyt", REJECTED)]
 SORTS = ["Numero", "Lähde A–Ö", "Käännös A–Ö", "Tila", "Samankaltaiset vierekkäin"]
@@ -47,6 +48,19 @@ class ReviewWindow:
         root.geometry("1400x800")
         root.protocol("WM_DELETE_WINDOW", self.close)
 
+        # Laid out to fit from MIN_SIZE up: two short toolbars, the counts in
+        # the status line, and list and editor sharing the width 2:3 at any size.
+        root.minsize(*MIN_SIZE)
+
+        bottom = ttk.Frame(root, padding=(8, 0, 8, 6))
+        bottom.pack(side="bottom", fill="x")  # packed first, so it stays when the window is short
+        self.status = ttk.Label(bottom, anchor="w")
+        self.status.pack(side="left", fill="x", expand=True)
+        self.counts = ttk.Label(bottom)
+        self.counts.pack(side="right")
+        self.shown = ttk.Label(bottom)
+        self.shown.pack(side="right", padx=(0, 16))
+
         top = ttk.Frame(root, padding=(8, 8, 8, 0))
         top.pack(fill="x")
         ttk.Label(top, text="Näytä:").pack(side="left")
@@ -54,64 +68,75 @@ class ReviewWindow:
         for label, _ in FILTERS:
             ttk.Radiobutton(top, text=label, value=label, variable=self.filter,
                             command=self.fill_list).pack(side="left", padx=4)
-        self.counts = ttk.Label(top)
-        self.counts.pack(side="right")
+        self.theme_choice = theme.load_choice()
+        self.theme_name = tk.StringVar(value=next(k for k, v in theme.CHOICES.items() if v == self.theme_choice))
+        themes = ttk.Combobox(top, textvariable=self.theme_name, values=list(theme.CHOICES), state="readonly",
+                              width=11)
+        themes.pack(side="right")
+        themes.bind("<<ComboboxSelected>>", lambda _: self.choose_theme())
+        ttk.Label(top, text="Teema:").pack(side="right", padx=(16, 4))
+        self.sort = tk.StringVar(value=SORTS[0])
+        sort = ttk.Combobox(top, textvariable=self.sort, values=SORTS, state="readonly", width=22)
+        sort.pack(side="right")
+        sort.bind("<<ComboboxSelected>>", lambda _: self.fill_list())
+        ttk.Label(top, text="Järjestä:").pack(side="right", padx=(16, 4))
 
         bar = ttk.Frame(root, padding=(8, 6, 8, 0))
         bar.pack(fill="x")
         ttk.Label(bar, text="Hae:").pack(side="left")
         self.search = tk.StringVar()
         self.search.trace_add("write", lambda *_: self.schedule_search())
-        search = ttk.Entry(bar, textvariable=self.search, width=30)
+        search = ttk.Entry(bar, textvariable=self.search, width=24)
         search.pack(side="left", padx=(4, 12))
         self.only_similar = tk.BooleanVar()
         ttk.Checkbutton(bar, text="Vain valitun kaltaiset", variable=self.only_similar,
                         command=self.toggle_similar).pack(side="left", padx=(0, 12))
         self.together = tk.BooleanVar()
         ttk.Checkbutton(bar, text="Toistot yhdessä", variable=self.together,
-                        command=self.toggle_together).pack(side="left", padx=(0, 12))
-        self.theme_choice = theme.load_choice()
-        self.theme_name = tk.StringVar(value=next(k for k, v in theme.CHOICES.items() if v == self.theme_choice))
-        themes = ttk.Combobox(bar, textvariable=self.theme_name, values=list(theme.CHOICES), state="readonly",
-                              width=12)
-        themes.pack(side="right")
-        themes.bind("<<ComboboxSelected>>", lambda _: self.choose_theme())
-        ttk.Label(bar, text="Teema:").pack(side="right", padx=(12, 4))
+                        command=self.toggle_together).pack(side="left")
         self.show_list = tk.BooleanVar(value=True)
         self.show_notes = tk.BooleanVar(value=True)
-        ttk.Checkbutton(bar, text="Näytä huomautukset", variable=self.show_notes,
-                        command=self.toggle_notes).pack(side="right", padx=(12, 0))
-        ttk.Checkbutton(bar, text="Näytä lista", variable=self.show_list,
-                        command=self.toggle_list).pack(side="right", padx=(12, 0))
-        ttk.Label(bar, text="Järjestä:").pack(side="left")
-        self.sort = tk.StringVar(value=SORTS[0])
-        sort = ttk.Combobox(bar, textvariable=self.sort, values=SORTS, state="readonly", width=26)
-        sort.pack(side="left", padx=4)
-        sort.bind("<<ComboboxSelected>>", lambda _: self.fill_list())
-        self.shown = ttk.Label(bar)
-        self.shown.pack(side="right")
+        ttk.Checkbutton(bar, text="Huomautukset", variable=self.show_notes,
+                        command=self.toggle_notes).pack(side="right")
+        ttk.Checkbutton(bar, text="Lista", variable=self.show_list,
+                        command=self.toggle_list).pack(side="right", padx=(12, 12))
 
         self.panes = panes = ttk.PanedWindow(root, orient="horizontal")
         panes.pack(fill="both", expand=True, padx=8, pady=8)
 
-        self.left = left = ttk.Frame(panes)
+        # Fixed requests (no propagation), so the panes split the width by
+        # weight instead of the list keeping its full natural width.
+        self.left = left = ttk.Frame(panes, width=MIN_SIZE[0] * 2 // 5)
+        left.pack_propagate(False)
         self.list = ttk.Treeview(left, columns=("n", "state", "repeats", "source", "target"), show="headings",
                                  selectmode="extended")
         for col, title, width, stretch in (("n", "Nro", 45, False), ("state", "Tila", 100, False),
                                            ("repeats", "×", 30, False),
-                                           ("source", "Lähde", 150, True), ("target", "Käännös", 150, True)):
+                                           ("source", "Lähde", 100, True), ("target", "Käännös", 100, True)):
             self.list.heading(col, text=title, anchor="w",
                               command=lambda col=col: (self.sort.set(HEADING_SORT[col]), self.fill_list()))
-            self.list.column(col, width=width, stretch=stretch, anchor="w")
+            self.list.column(col, width=width, minwidth=30, stretch=stretch, anchor="w")
         scroll = ttk.Scrollbar(left, orient="vertical", command=self.list.yview)
         self.list.configure(yscrollcommand=scroll.set)
-        self.list.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        self.list.pack(side="left", fill="both", expand=True)
         self.list.bind("<<TreeviewSelect>>", self.on_select)
         self.list.bind("<Control-a>", lambda _: (self.list.selection_set(self.list.get_children()), "break")[1])
         panes.add(left, weight=2)
 
-        right = ttk.Frame(panes)
+        right = ttk.Frame(panes, width=MIN_SIZE[0] * 3 // 5)
+        right.pack_propagate(False)
+        self.buttons = buttons = ttk.Frame(right)
+        buttons.pack(side="bottom", fill="x", pady=(6, 0))  # first, so it stays when the window is short
+        self.approve_label = tk.StringVar()
+        self.reject_label = tk.StringVar()
+        ttk.Button(buttons, textvariable=self.approve_label, command=self.approve).pack(side="left")
+        ttk.Button(buttons, textvariable=self.reject_label, command=self.reject).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Seuraava", command=lambda: self.step(1)).pack(side="right")
+        ttk.Button(buttons, text="Edellinen", command=lambda: self.step(-1)).pack(side="right", padx=6)
+        self.notes_frame = ttk.Frame(right)
+        self.notes_frame.pack(side="bottom", fill="x")
+        self.notes = self._text(self.notes_frame, "Huomautukset", height=5, readonly=True, expand=False)
         # Source and translation side by side, in equal columns.
         pair = ttk.Frame(right)
         pair.pack(fill="both", expand=True)
@@ -120,24 +145,10 @@ class ReviewWindow:
         source_col, target_col = ttk.Frame(pair), ttk.Frame(pair)
         source_col.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         target_col.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
-        self.source = self._text(source_col, "Lähde", height=8, readonly=True)
-        self.target = self._text(target_col, "Käännös", height=8)
-        self.notes_frame = ttk.Frame(right)
-        self.notes_frame.pack(fill="x")
-        self.notes = self._text(self.notes_frame, "Huomautukset", height=6, readonly=True, expand=False)
+        self.source = self._text(source_col, "Lähde", height=4, readonly=True)
+        self.target = self._text(target_col, "Käännös", height=4)
         self.target.bind("<<Modified>>", self.on_edit)
-        self.buttons = buttons = ttk.Frame(right)
-        buttons.pack(fill="x", pady=(6, 0))
-        self.approve_label = tk.StringVar()
-        self.reject_label = tk.StringVar()
-        ttk.Button(buttons, textvariable=self.approve_label, command=self.approve).pack(side="left")
-        ttk.Button(buttons, textvariable=self.reject_label, command=self.reject).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Seuraava (Ctrl+↓)", command=lambda: self.step(1)).pack(side="right")
-        ttk.Button(buttons, text="Edellinen (Ctrl+↑)", command=lambda: self.step(-1)).pack(side="right", padx=6)
         panes.add(right, weight=3)
-
-        self.status = ttk.Label(root, padding=(8, 0, 8, 6), anchor="w")
-        self.status.pack(fill="x")
 
         # Bound on the target itself too, so its own Return and Ctrl+arrow
         # bindings never run first.
@@ -269,7 +280,7 @@ class ReviewWindow:
 
     def toggle_notes(self):
         if self.show_notes.get():
-            self.notes_frame.pack(fill="x", before=self.buttons)
+            self.notes_frame.pack(side="bottom", fill="x", after=self.buttons)
         else:
             self.notes_frame.pack_forget()
 
