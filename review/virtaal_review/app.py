@@ -21,9 +21,8 @@ AUTOSAVE_MS = 1500
 MIN_SIZE = (1000, 560)
 SEARCH_DELAY_MS = 250
 FILTERS = [("Kaikki", None), ("Avoimet", OPEN), ("Hyväksytyt", APPROVED), ("Hylätyt", REJECTED)]
-SORTS = ["Numero", "Lähde A–Ö", "Käännös A–Ö", "Tila", "Samankaltaiset vierekkäin"]
-HEADING_SORT = {"n": "Numero", "state": "Tila", "repeats": "Samankaltaiset vierekkäin",
-                "source": "Lähde A–Ö", "target": "Käännös A–Ö"}
+COLUMNS = [("n", "Nro", 45, False), ("state", "Tila", 100, False), ("repeats", "×", 30, False),
+           ("source", "Lähde", 100, True), ("target", "Käännös", 100, True)]
 # Swedish and Finnish put å, ä and ö after z, in that order.
 # "{", "|" and "}" are the characters right after "z".
 _ALPHABET = str.maketrans({"å": "{", "ä": "|", "æ": "|", "ö": "}", "ø": "}"})
@@ -75,11 +74,8 @@ class ReviewWindow:
         themes.pack(side="right")
         themes.bind("<<ComboboxSelected>>", lambda _: self.choose_theme())
         ttk.Label(top, text="Teema:").pack(side="right", padx=(16, 4))
-        self.sort = tk.StringVar(value=SORTS[0])
-        sort = ttk.Combobox(top, textvariable=self.sort, values=SORTS, state="readonly", width=22)
-        sort.pack(side="right")
-        sort.bind("<<ComboboxSelected>>", lambda _: self.fill_list())
-        ttk.Label(top, text="Järjestä:").pack(side="right", padx=(16, 4))
+        # The list is sorted by clicking a column title; again reverses it.
+        self.sort_column, self.sort_reversed = "n", False
 
         bar = ttk.Frame(root, padding=(8, 6, 8, 0))
         bar.pack(fill="x")
@@ -110,11 +106,8 @@ class ReviewWindow:
         left.pack_propagate(False)
         self.list = ttk.Treeview(left, columns=("n", "state", "repeats", "source", "target"), show="headings",
                                  selectmode="extended")
-        for col, title, width, stretch in (("n", "Nro", 45, False), ("state", "Tila", 100, False),
-                                           ("repeats", "×", 30, False),
-                                           ("source", "Lähde", 100, True), ("target", "Käännös", 100, True)):
-            self.list.heading(col, text=title, anchor="w",
-                              command=lambda col=col: (self.sort.set(HEADING_SORT[col]), self.fill_list()))
+        for col, title, width, stretch in COLUMNS:
+            self.list.heading(col, text=title, anchor="w", command=lambda col=col: self.sort_by(col))
             self.list.column(col, width=width, minwidth=30, stretch=stretch, anchor="w")
         scroll = ttk.Scrollbar(left, orient="vertical", command=self.list.yview)
         self.list.configure(yscrollcommand=scroll.set)
@@ -192,19 +185,36 @@ class ReviewWindow:
             return all(word in text for word in words)
         return True
 
+    def sort_by(self, column):
+        """Sort by a column; the same column again reverses the order."""
+        if column == self.sort_column:
+            self.sort_reversed = not self.sort_reversed
+        else:
+            # Most repeats first is the useful start for that column.
+            self.sort_column, self.sort_reversed = column, column == "repeats"
+        self.fill_list()
+
     def sort_key(self):
         s = self.session
         return {
-            "Numero": lambda i: i,
-            "Lähde A–Ö": lambda i: (alphabetical(s.source_plain[i]), i),
-            "Käännös A–Ö": lambda i: (alphabetical(plain(s.units[i].target)), i),
-            "Tila": lambda i: (s.state_id(i), i),
-            "Samankaltaiset vierekkäin": lambda i: (s.source_pattern[i], alphabetical(s.source_plain[i]), i),
-        }[self.sort.get()]
+            "n": lambda i: i,
+            "state": lambda i: (s.state_id(i), i),
+            "repeats": lambda i: (len(s.repeats[i]), alphabetical(s.source_pattern[i]), i),
+            # Case and numbers ignored first, so "12 x 20" and "14 x 20" sit together.
+            "source": lambda i: (alphabetical(s.source_pattern[i]), alphabetical(s.source_plain[i]), i),
+            "target": lambda i: (alphabetical(plain(s.units[i].target)), i),
+        }[self.sort_column]
+
+    def update_headings(self):
+        for col, title, _, _ in COLUMNS:
+            arrow = (" ▼" if self.sort_reversed else " ▲") if col == self.sort_column else ""
+            self.list.heading(col, text=title + arrow)
 
     def fill_list(self):
         self.list.delete(*self.list.get_children())
-        rows = sorted((i for i in range(len(self.session)) if self.visible(i)), key=self.sort_key())
+        rows = sorted((i for i in range(len(self.session)) if self.visible(i)), key=self.sort_key(),
+                      reverse=self.sort_reversed)
+        self.update_headings()
         for i in rows:
             self.list.insert("", "end", iid=str(i), values=self.row(i))
         self.update_counts()

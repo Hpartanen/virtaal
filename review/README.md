@@ -35,9 +35,9 @@ virtaal-review = { git = "https://github.com/Hpartanen/virtaal", subdirectory = 
   approved: an edited string needs approving again.
 - Ctrl+↑ / Ctrl+↓ move through the list. The list can be filtered by state
   and by search text (source or translation), narrowed to the strings like
-  the selected one, and sorted by number, source, translation, state, or with
-  similar strings next to each other (case and numbers ignored). Rich-text
-  sources show as their visible text.
+  the selected one, and sorted by clicking a column title (again to reverse).
+  Sorting by source ignores case and numbers first, so similar strings sit
+  next to each other. Rich-text sources show as their visible text.
 - Several selected strings (Shift/Ctrl-click, Ctrl+A) are approved or
   rejected at once; empty translations are skipped.
 - **Toistot yhdessä** (off by default): strings with exactly the same source
