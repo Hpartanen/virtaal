@@ -55,9 +55,17 @@ class ReviewWindow:
         panes.add(left, weight=2)
 
         right = ttk.Frame(panes)
-        self.source = self._text(right, "Lähde", height=5, readonly=True)
-        self.notes = self._text(right, "Huomautukset", height=6, readonly=True)
-        self.target = self._text(right, "Käännös", height=6)
+        # Source and translation side by side, in equal columns.
+        pair = ttk.Frame(right)
+        pair.pack(fill="both", expand=True)
+        pair.columnconfigure((0, 1), weight=1, uniform="pair")
+        pair.rowconfigure(0, weight=1)
+        source_col, target_col = ttk.Frame(pair), ttk.Frame(pair)
+        source_col.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        target_col.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+        self.source = self._text(source_col, "Lähde", height=8, readonly=True)
+        self.target = self._text(target_col, "Käännös", height=8)
+        self.notes = self._text(right, "Huomautukset", height=6, readonly=True, expand=False)
         self.target.bind("<<Modified>>", self.on_edit)
         buttons = ttk.Frame(right)
         buttons.pack(fill="x", pady=(6, 0))
@@ -82,10 +90,10 @@ class ReviewWindow:
         self.set_status(f"Varmuuskopio: {session.backup_path}")
         self.target.focus_set()
 
-    def _text(self, parent, title, height, readonly=False):
+    def _text(self, parent, title, height, readonly=False, expand=True):
         ttk.Label(parent, text=title).pack(anchor="w", pady=(6, 0))
         text = tk.Text(parent, height=height, wrap="word", undo=not readonly, font=("Segoe UI", 11))
-        text.pack(fill="both", expand=True)
+        text.pack(fill="both", expand=expand)
         if readonly:
             text.configure(state="disabled", background=self.root.cget("background"))
         return text
