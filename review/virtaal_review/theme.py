@@ -7,6 +7,7 @@ The choice is kept beside Virtaal's own settings.
 import json
 import os
 import sys
+from tkinter import ttk
 
 import sv_ttk
 
@@ -15,6 +16,9 @@ CHOICES = {"Järjestelmä": "system", "Vaalea": "light", "Tumma": "dark"}
 
 # Text boxes: (editable background, read-only background, border).
 TEXT_COLOURS = {"light": ("#ffffff", "#f3f3f3", "#e0e0e0"), "dark": ("#2b2b2b", "#232323", "#3a3a3a")}
+# The selected list row, (background, text): sv-ttk's accent colour, as on its
+# check and radio buttons, so the row stands out with or without focus.
+SELECTED_ROW = {"light": ("#005fb8", "#ffffff"), "dark": ("#57c8ff", "#000000")}
 
 
 def system_mode():
@@ -62,6 +66,8 @@ def apply(root, choice, editable, readonly):
     # sv-ttk recolours plain Tk widgets when the theme change is handled;
     # let that happen first, then give the text boxes their own colours.
     root.update_idletasks()
+    background, foreground = SELECTED_ROW[mode]
+    ttk.Style(root).map("Treeview", background=[("selected", background)], foreground=[("selected", foreground)])
     field, quiet, border = TEXT_COLOURS[mode]
     for text, background in [(t, field) for t in editable] + [(t, quiet) for t in readonly]:
         text.configure(background=background, highlightthickness=1, highlightbackground=border,
