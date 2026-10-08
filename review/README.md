@@ -1,7 +1,7 @@
 # virtaal-review
 
 A small Tkinter window for reviewing one XLIFF 1.2 file on Virtaal's core
-(its `StoreModel` and Finnish state names), without GTK. Virtaal's own
+(its `StoreModel`), without GTK. Virtaal's own
 `virtaal/` package is imported from this checkout and left untouched.
 
 ## Start
@@ -18,7 +18,7 @@ It asks for the file; a path to an `.xliff` can also be given at the end.
 ## As a dependency
 
 Another project can install it from git; the wheel then carries its own copy
-of Virtaal's `virtaal/` package and Finnish catalog:
+of Virtaal's `virtaal/` package:
 
 ```toml
 [tool.uv.sources]
@@ -47,6 +47,9 @@ virtaal-review = { git = "https://github.com/Hpartanen/virtaal", subdirectory = 
   one). A plain-text source and a rich-text one with the same visible text
   are not repeats of each other.
 - The list and the notes can be hidden.
+- The Tila column uses the review's own words, the same as the buttons and
+  filters (✓ Hyväksytty = `signed-off`, ✗ Hylätty = `needs-translation`,
+  • Avoin = anything else), coloured by state.
 - **Kumoa** (Ctrl+Z) undoes the last approval or rejection, bundles and
   copied translations included; in the translation box Ctrl+Z first undoes
   typing. Changed rows flash briefly; the status line keeps the last action,

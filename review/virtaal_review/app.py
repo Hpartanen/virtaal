@@ -18,7 +18,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import theme
-from .session import APPROVED, OPEN, REJECTED, RefusedFile, ReviewSession, plain, state_names
+from .session import APPROVED, OPEN, REJECTED, RefusedFile, ReviewSession, plain
 
 AUTOSAVE_MS = 1500
 FLASH_MS = 1500
@@ -34,6 +34,7 @@ F1\tTämä ohje
 
 Lista
 Sarakkeen otsikko järjestää listan; uusi napsautus kääntää järjestyksen.
+Tila: ✓ Hyväksytty, ✗ Hylätty tai • Avoin (ei vielä päätetty).
 × kertoo, montako samaa tekstiä on. ≠ tarkoittaa, että niiden käännökset
 eroavat nyt toisistaan.
 
@@ -43,6 +44,9 @@ Muokkaus, hyväksyntä ja hylkäys koskevat koko nippua: kaikki saavat
 näytetyn käännöksen. Muotoillun tekstin muotoilu säilyy."""
 MIN_SIZE = (1000, 560)
 SEARCH_DELAY_MS = 250
+# The Tila column speaks the review's words, the same as the buttons and filters.
+STATES = {OPEN: "• Avoin", REJECTED: "✗ Hylätty", APPROVED: "✓ Hyväksytty"}
+STATE_ORDER = {OPEN: 0, REJECTED: 1, APPROVED: 2}
 FILTERS = [("Kaikki", None), ("Avoimet", OPEN), ("Hyväksytyt", APPROVED), ("Hylätyt", REJECTED)]
 COLUMNS = [("n", "Nro", 45, False), ("state", "Tila", 100, False), ("repeats", "×", 30, False),
            ("source", "Lähde", 100, True), ("target", "Käännös", 100, True)]
@@ -87,7 +91,6 @@ class ReviewWindow:
     def __init__(self, root, session):
         self.root = root
         self.session = session
-        self.names = state_names()
         self.current = None
         self.loading = False
         self.autosave_job = None
@@ -108,7 +111,7 @@ class ReviewWindow:
         self.status.pack(side="left", fill="x", expand=True)
         self.counts = ttk.Label(bottom)
         self.counts.pack(side="right")
-        self.saved = ttk.Label(bottom)
+        self.saved = ttk.Label(bottom, text="Ei muutoksia")
         self.saved.pack(side="right", padx=(0, 16))
         self.shown = ttk.Label(bottom)
         self.shown.pack(side="right", padx=(0, 16))
@@ -194,9 +197,14 @@ class ReviewWindow:
                 ("Seuraava", lambda: self.step(1), "right", 0, "Seuraava rivi (Ctrl+↓)"),
                 ("Edellinen", lambda: self.step(-1), "right", 6, "Edellinen rivi (Ctrl+↑)")):
             text = {"textvariable": label} if isinstance(label, tk.StringVar) else {"text": label}
-            button = ttk.Button(buttons, command=action, **text)
+            # Approving is the main action, so it gets the theme's accent.
+            style = {"style": "Accent.TButton"} if label is self.approve_label else {}
+            button = ttk.Button(buttons, command=action, **text, **style)
             button.pack(side=side, padx=pad)
             Tooltip(button, tip)
+            if label == "Kumoa":
+                self.undo_button = button
+                button.state(["disabled"])  # nothing to undo yet
         self.notes_frame = ttk.Frame(right)
         self.notes_frame.pack(side="bottom", fill="x")
         self.notes = self._text(self.notes_frame, "Huomautukset", height=5, readonly=True, expand=False)
@@ -250,7 +258,11 @@ class ReviewWindow:
             # "≠": the repeats have different translations now; a decision
             # with "Toistot yhdessä" on gives them all the shown one.
             count = f"{len(repeats)} ≠" if self.differs(i) else len(repeats)
-        return (i + 1, self.names[s.state_id(i)], count, s.source_plain[i], plain(s.units[i].target))
+        return (i + 1, STATES[s.kind(i)], count, s.source_plain[i], plain(s.units[i].target))
+
+    def tags(self, i, *extra):
+        """The row's tags: its state (coloured by the theme) and any extra ones."""
+        return (self.session.kind(i),) + extra
 
     def visible(self, i):
         wanted = dict(FILTERS)[self.filter.get()]
@@ -277,7 +289,7 @@ class ReviewWindow:
         s = self.session
         return {
             "n": lambda i: i,
-            "state": lambda i: (s.state_id(i), i),
+            "state": lambda i: (STATE_ORDER[s.kind(i)], s.state_id(i), i),
             "repeats": lambda i: (len(s.repeats[i]), alphabetical(s.source_pattern[i]), i),
             # Case and numbers ignored first, so "12 x 20" and "14 x 20" sit together.
             "source": lambda i: (alphabetical(s.source_pattern[i]), alphabetical(s.source_plain[i]), i),
@@ -314,10 +326,10 @@ class ReviewWindow:
         rows.sort(key=self.sort_key(), reverse=self.sort_reversed)
         self.update_headings()
         for i in rows:
-            self.list.insert("", "end", iid=str(i), values=self.row(i))
+            self.list.insert("", "end", iid=str(i), values=self.row(i), tags=self.tags(i))
             if self.bundled():
                 for j in s.repeats[i][1:]:
-                    self.list.insert(str(i), "end", iid=str(j), values=self.row(j))
+                    self.list.insert(str(i), "end", iid=str(j), values=self.row(j), tags=self.tags(j))
         self.update_counts()
         if self.current is not None and self.list.exists(str(self.current)):
             self.select(self.current)
@@ -336,7 +348,7 @@ class ReviewWindow:
 
     def refresh_row(self, i):
         if self.list.exists(str(i)):
-            self.list.item(str(i), values=self.row(i))
+            self.list.item(str(i), values=self.row(i), tags=self.tags(i))
         self.update_counts()
 
     def select(self, i):
@@ -380,6 +392,8 @@ class ReviewWindow:
     def apply_theme(self):
         mode = theme.apply(self.root, self.theme_choice, [self.target], [self.source, self.notes])
         self.list.tag_configure("changed", background=theme.FLASH[mode])
+        for kind, colour in theme.STATE_TEXT[mode].items():
+            self.list.tag_configure(kind, foreground=colour)
 
     def choose_theme(self):
         self.theme_choice = theme.CHOICES[self.theme_name.get()]
@@ -408,8 +422,22 @@ class ReviewWindow:
         self.fill_list()
 
     def differs(self, i):
-        """Whether the strings bundled with i have different translations now."""
-        return len({self.session.translation(j) for j in self.session.repeats[i]}) > 1
+        """Whether the bundle's readable translations differ now. A rich-text
+        translation that is not one run of text (such as a draft with text
+        outside its markup) cannot be compared, so it does not count here."""
+        readable = {self.session.translation(j) for j in self.session.repeats[i]} - {None}
+        return len(readable) > 1
+
+    def overwrites(self, i):
+        """Whether sharing string i's translation changes another member's."""
+        shown = self.session.translation(i)
+        return any(self.session.translation(j) != shown for j in self.session.repeats[i] if j != i)
+
+    def unshareable(self, i):
+        """String i's translation cannot be read as one run of text, yet the
+        other members do not all have the same translation as it."""
+        s = self.session
+        return s.translation(i) is None and any(s.units[j].target != s.units[i].target for j in s.repeats[i])
 
     def members(self, chosen):
         """The chosen strings, with their bundles when bundling is on."""
@@ -436,6 +464,7 @@ class ReviewWindow:
     def remember(self, what, chosen):
         """Keep the strings a decision is about to change, for undo()."""
         self.undo_stack.append((what, self.session.snapshot(self.members(chosen))))
+        self.undo_button.state(["!disabled"])
 
     def undo(self):
         if not self.undo_stack:
@@ -443,6 +472,8 @@ class ReviewWindow:
             self.set_status("Ei kumottavaa.")
             return
         what, snapshot = self.undo_stack.pop()
+        if not self.undo_stack:
+            self.undo_button.state(["disabled"])
         self.session.restore(snapshot)
         changed = [i for i, _ in snapshot]
         self.current = None
@@ -466,14 +497,14 @@ class ReviewWindow:
 
     def flash(self, indices):
         """Mark the rows a decision changed for a moment."""
-        rows = [str(i) for i in indices if self.list.exists(str(i))]
-        for iid in rows:
-            self.list.item(iid, tags=("changed",))
+        rows = [i for i in indices if self.list.exists(str(i))]
+        for i in rows:
+            self.list.item(str(i), tags=self.tags(i, "changed"))
 
         def clear():
-            for iid in rows:
-                if self.list.exists(iid):
-                    self.list.item(iid, tags=())
+            for i in rows:
+                if self.list.exists(str(i)):
+                    self.list.item(str(i), tags=self.tags(i))
 
         self.root.after(FLASH_MS, clear)
 
@@ -529,8 +560,8 @@ class ReviewWindow:
             self.root.bell()
             self.set_status("Tyhjää käännöstä ei voi hyväksyä.")
             return
-        differing = self.bundled() and any(self.differs(i) for i in chosen)
-        if differing and any(self.differs(i) and self.session.translation(i) is None for i in chosen):
+        differing = self.bundled() and any(self.overwrites(i) for i in chosen)
+        if self.bundled() and any(self.unshareable(i) for i in chosen):
             # The shown translation cannot be read as one run of text, so it
             # cannot be shared; signing off differing translations would mislead.
             self.root.bell()

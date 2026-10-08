@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from virtaal_review.session import APPROVED, OPEN, REJECTED, RefusedFile, ReviewSession, pattern, plain, state_names
+from virtaal_review.session import APPROVED, OPEN, REJECTED, RefusedFile, ReviewSession, pattern, plain
 
 HEAD = '<?xml version="1.0" encoding="UTF-8"?>\n<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">\n'
 FILE = '<file original="t" source-language="sv" target-language="fi" datatype="plaintext"><body>\n'
@@ -130,10 +130,6 @@ def test_untouched_units_round_trip(basic):
     assert after.count("<note>") == before.count("<note>")
     assert [u.xmlelement.get("id") for u in reopen(s).units] == ["a", "b"]
 
-
-def test_virtaal_state_names_are_finnish():
-    names = state_names()
-    assert names[120] == "Tarkastettu" and names[30] == "Keskeneräinen"
 
 
 def test_plain_drops_rich_text_markup():

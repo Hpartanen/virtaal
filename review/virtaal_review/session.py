@@ -18,7 +18,6 @@ import re
 import shutil
 import tempfile
 import time
-import types
 from difflib import SequenceMatcher
 
 from lxml import etree
@@ -35,36 +34,6 @@ _XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
 
 class RefusedFile(Exception):
     """The file cannot be reviewed safely; the message is for the reviewer, in Finnish."""
-
-
-def _install_catalog():
-    """Compile the wheel's fi.po where Virtaal looks for its catalog.
-
-    In a checkout there is no packaged fi.po: Virtaal compiles po/fi.po itself.
-    """
-    from translate.tools.pocompile import convertmo
-    from virtaal.common.platform import platform
-
-    po = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fi.po")
-    mo = os.path.join(platform.locale_dir, "fi", "LC_MESSAGES", "virtaal.mo")
-    if not os.path.isfile(po) or os.path.isfile(mo):
-        return
-    os.makedirs(os.path.dirname(mo), exist_ok=True)
-    with open(mo + ".tmp", "w") as out, open(po, "rb") as src:
-        convertmo(src, out, None)
-    os.replace(mo + ".tmp", mo)
-
-
-def state_names():
-    """Virtaal's own Finnish names for the unit states, keyed by StateEnum."""
-    from virtaal.common import pan_app
-
-    _install_catalog()
-
-    pan_app.set_ui_language("fi")
-    from virtaal.controllers.unitcontroller import UnitController
-
-    return UnitController.get_unit_state_names(types.SimpleNamespace())
 
 
 def check_line_breaks(path):

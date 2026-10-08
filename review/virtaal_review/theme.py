@@ -21,6 +21,10 @@ TEXT_COLOURS = {"light": ("#ffffff", "#f3f3f3", "#e0e0e0"), "dark": ("#2b2b2b", 
 SELECTED_ROW = {"light": ("#005fb8", "#ffffff"), "dark": ("#57c8ff", "#000000")}
 # Rows a decision just changed, for a moment.
 FLASH = {"light": "#fff1b8", "dark": "#5c4a00"}
+# Text colour of approved and rejected rows: Windows 11's success and
+# critical colours for each mode; open rows keep the normal text colour.
+STATE_TEXT = {"light": {"approved": "#0f7b0f", "rejected": "#c42b1c"},
+              "dark": {"approved": "#6ccb5f", "rejected": "#ff99a4"}}
 
 
 def system_mode():
