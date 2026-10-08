@@ -11,6 +11,7 @@ States, as XLIFF writes them:
   rejected  state="needs-translation" (NEEDS_WORK, "Keskeneräinen"), target kept.
   open      anything else; an edited target becomes state="translated".
 """
+import copy
 import html
 import os
 import re
@@ -272,6 +273,24 @@ class ReviewSession:
 
     def reject(self, i):
         self.units[i].set_state_n(self.units[i].S_NEEDS_TRANSLATION)
+        self.dirty = True
+
+    # Undo
+
+    def snapshot(self, indices):
+        """Copies of the strings' XML, for restore() to put back exactly."""
+        return [(i, copy.deepcopy(self.units[i].xmlelement)) for i in indices]
+
+    def restore(self, snapshot):
+        for i, saved in snapshot:
+            element = self.units[i].xmlelement
+            tail = element.tail
+            element.clear()
+            element.attrib.update(saved.attrib)
+            element.text = saved.text
+            for child in saved:
+                element.append(copy.deepcopy(child))
+            element.tail = tail
         self.dirty = True
 
     # Saving

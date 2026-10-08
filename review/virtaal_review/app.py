@@ -6,8 +6,11 @@ and on close.
 
 The list can be filtered (state, search text, strings like the selected one)
 and sorted; several selected strings can be approved or rejected at once.
-With "Toistot yhdessä" on, strings that read the same are bundled under one
-expandable row and share one translation and one decision.
+With "Niputa samat tekstit" on, strings that read the same are bundled under
+one expandable row and share one translation and one decision.
+
+Every decision can be undone (Ctrl+Z, Kumoa); rows a decision changed flash
+briefly, and the status line keeps the last action apart from the save state.
 """
 import argparse
 import time
@@ -18,6 +21,26 @@ from . import theme
 from .session import APPROVED, OPEN, REJECTED, RefusedFile, ReviewSession, plain, state_names
 
 AUTOSAVE_MS = 1500
+FLASH_MS = 1500
+TOOLTIP_DELAY_MS = 500
+HELP = """Näppäimet
+Ctrl+Enter\tHyväksy ja siirry seuraavaan avoimeen
+Ctrl+Shift+Enter\tHylkää ja siirry seuraavaan
+Ctrl+Z\tKumoa viimeisin hyväksyntä tai hylkäys
+Ctrl+↑ / Ctrl+↓\tEdellinen / seuraava rivi
+Ctrl+A (listassa)\tValitse kaikki listan rivit
+Ctrl+S\tTallenna heti (tallennus tapahtuu myös itsestään)
+F1\tTämä ohje
+
+Lista
+Sarakkeen otsikko järjestää listan; uusi napsautus kääntää järjestyksen.
+× kertoo, montako samaa tekstiä on. ≠ tarkoittaa, että niiden käännökset
+eroavat nyt toisistaan.
+
+Niputa samat tekstit
+Samat tekstit näkyvät yhtenä rivinä, jonka alla ovat sen jäsenet.
+Muokkaus, hyväksyntä ja hylkäys koskevat koko nippua: kaikki saavat
+näytetyn käännöksen. Muotoillun tekstin muotoilu säilyy."""
 MIN_SIZE = (1000, 560)
 SEARCH_DELAY_MS = 250
 FILTERS = [("Kaikki", None), ("Avoimet", OPEN), ("Hyväksytyt", APPROVED), ("Hylätyt", REJECTED)]
@@ -30,6 +53,34 @@ _ALPHABET = str.maketrans({"å": "{", "ä": "|", "æ": "|", "ö": "}", "ø": "}"
 
 def alphabetical(text):
     return text.casefold().translate(_ALPHABET)
+
+
+class Tooltip:
+    """A short explanation that appears when the pointer rests on a widget."""
+
+    def __init__(self, widget, text):
+        self.widget, self.text, self.job, self.tip = widget, text, None, None
+        widget.bind("<Enter>", self.schedule, add="+")
+        widget.bind("<Leave>", self.hide, add="+")
+        widget.bind("<ButtonPress>", self.hide, add="+")
+
+    def schedule(self, _event=None):
+        self.hide()
+        self.job = self.widget.after(TOOLTIP_DELAY_MS, self.show)
+
+    def show(self):
+        self.tip = tk.Toplevel(self.widget)
+        self.tip.wm_overrideredirect(True)
+        self.tip.wm_geometry(f"+{self.widget.winfo_rootx() + 8}+{self.widget.winfo_rooty() + self.widget.winfo_height() + 4}")
+        ttk.Label(self.tip, text=self.text, padding=(8, 4), relief="solid", borderwidth=1).pack()
+
+    def hide(self, _event=None):
+        if self.job:
+            self.widget.after_cancel(self.job)
+            self.job = None
+        if self.tip:
+            self.tip.destroy()
+            self.tip = None
 
 
 class ReviewWindow:
@@ -57,6 +108,8 @@ class ReviewWindow:
         self.status.pack(side="left", fill="x", expand=True)
         self.counts = ttk.Label(bottom)
         self.counts.pack(side="right")
+        self.saved = ttk.Label(bottom)
+        self.saved.pack(side="right", padx=(0, 16))
         self.shown = ttk.Label(bottom)
         self.shown.pack(side="right", padx=(0, 16))
 
@@ -74,6 +127,10 @@ class ReviewWindow:
         themes.pack(side="right")
         themes.bind("<<ComboboxSelected>>", lambda _: self.choose_theme())
         ttk.Label(top, text="Teema:").pack(side="right", padx=(16, 4))
+        help_button = ttk.Button(top, text="?", width=3, command=self.help)
+        help_button.pack(side="right")
+        Tooltip(help_button, "Ohje ja näppäimet (F1)")
+        self.undo_stack = []  # (what was done, snapshot of the strings before it)
         # The list is sorted by clicking a column title; again reverses it.
         self.sort_column, self.sort_reversed = "n", False
 
@@ -84,12 +141,17 @@ class ReviewWindow:
         self.search.trace_add("write", lambda *_: self.schedule_search())
         search = ttk.Entry(bar, textvariable=self.search, width=24)
         search.pack(side="left", padx=(4, 12))
+        Tooltip(search, "Näyttää rivit, joiden lähteessä tai käännöksessä ovat kaikki kirjoitetut sanat")
         self.only_similar = tk.BooleanVar()
-        ttk.Checkbutton(bar, text="Vain valitun kaltaiset", variable=self.only_similar,
-                        command=self.toggle_similar).pack(side="left", padx=(0, 12))
+        similar = ttk.Checkbutton(bar, text="Vain valitun kaltaiset", variable=self.only_similar,
+                                  command=self.toggle_similar)
+        similar.pack(side="left", padx=(0, 12))
+        Tooltip(similar, "Näyttää vain valitun rivin kaltaiset tekstit (kirjainkoko ja numerot ohitetaan)")
         self.together = tk.BooleanVar()
-        ttk.Checkbutton(bar, text="Toistot yhdessä", variable=self.together,
-                        command=self.toggle_together).pack(side="left")
+        together = ttk.Checkbutton(bar, text="Niputa samat tekstit", variable=self.together,
+                                   command=self.toggle_together)
+        together.pack(side="left")
+        Tooltip(together, "Samat tekstit yhtenä rivinä; muokkaus, hyväksyntä ja hylkäys koskevat koko nippua")
         self.show_list = tk.BooleanVar(value=True)
         self.show_notes = tk.BooleanVar(value=True)
         ttk.Checkbutton(bar, text="Huomautukset", variable=self.show_notes,
@@ -125,10 +187,16 @@ class ReviewWindow:
         buttons.pack(side="bottom", fill="x", pady=(6, 0))  # first, so it stays when the window is short
         self.approve_label = tk.StringVar()
         self.reject_label = tk.StringVar()
-        ttk.Button(buttons, textvariable=self.approve_label, command=self.approve).pack(side="left")
-        ttk.Button(buttons, textvariable=self.reject_label, command=self.reject).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Seuraava", command=lambda: self.step(1)).pack(side="right")
-        ttk.Button(buttons, text="Edellinen", command=lambda: self.step(-1)).pack(side="right", padx=6)
+        for label, action, side, pad, tip in (
+                (self.approve_label, self.approve, "left", 0, "Hyväksy ja siirry seuraavaan avoimeen (Ctrl+Enter)"),
+                (self.reject_label, self.reject, "left", 6, "Hylkää ja siirry seuraavaan (Ctrl+Shift+Enter)"),
+                ("Kumoa", self.undo, "left", 0, "Kumoa viimeisin hyväksyntä tai hylkäys (Ctrl+Z)"),
+                ("Seuraava", lambda: self.step(1), "right", 0, "Seuraava rivi (Ctrl+↓)"),
+                ("Edellinen", lambda: self.step(-1), "right", 6, "Edellinen rivi (Ctrl+↑)")):
+            text = {"textvariable": label} if isinstance(label, tk.StringVar) else {"text": label}
+            button = ttk.Button(buttons, command=action, **text)
+            button.pack(side=side, padx=pad)
+            Tooltip(button, tip)
         self.notes_frame = ttk.Frame(right)
         self.notes_frame.pack(side="bottom", fill="x")
         self.notes = self._text(self.notes_frame, "Huomautukset", height=5, readonly=True, expand=False)
@@ -149,11 +217,16 @@ class ReviewWindow:
         # bindings never run first.
         for key, action in (("<Control-Return>", self.approve), ("<Control-Shift-Return>", self.reject),
                             ("<Control-Down>", lambda: self.step(1)), ("<Control-Up>", lambda: self.step(-1)),
-                            ("<Control-s>", self.save)):
+                            ("<Control-s>", self.save), ("<F1>", self.help)):
             for widget in (root, self.target, self.list):
                 widget.bind(key, lambda event, action=action: (action(), "break")[1])
+        # Ctrl+Z undoes typing first, as in any text box; with nothing typed to
+        # undo there, and anywhere else, it undoes the last decision.
+        root.bind("<Control-z>", lambda _: (self.undo(), "break")[1])
+        self.list.bind("<Control-z>", lambda _: (self.undo(), "break")[1])
+        self.target.bind("<Control-z>", self.on_target_undo)
 
-        theme.apply(root, self.theme_choice, [self.target], [self.source, self.notes])
+        self.apply_theme()
         self.fill_list()
         self.set_status(f"Varmuuskopio: {session.backup_path}")
         self.target.focus_set()
@@ -176,7 +249,7 @@ class ReviewWindow:
         if len(repeats) > 1:
             # "≠": the repeats have different translations now; a decision
             # with "Toistot yhdessä" on gives them all the shown one.
-            count = f"{len(repeats)} ≠" if len({s.target(j) for j in repeats}) > 1 else len(repeats)
+            count = f"{len(repeats)} ≠" if self.differs(i) else len(repeats)
         return (i + 1, self.names[s.state_id(i)], count, s.source_plain[i], plain(s.units[i].target))
 
     def visible(self, i):
@@ -288,7 +361,7 @@ class ReviewWindow:
         n = len(self.list.selection())
         many = f" valitut ({n})" if n > 1 else ""
         self.approve_label.set(f"Hyväksy{many} (Ctrl+Enter)")
-        self.reject_label.set(f"Hylkää{many} (Ctrl+Shift+Enter)")
+        self.reject_label.set(f"Hylkää{many}")
 
     def schedule_search(self):
         if self.search_job:
@@ -304,10 +377,17 @@ class ReviewWindow:
             self.similar = None
         self.fill_list()
 
+    def apply_theme(self):
+        mode = theme.apply(self.root, self.theme_choice, [self.target], [self.source, self.notes])
+        self.list.tag_configure("changed", background=theme.FLASH[mode])
+
     def choose_theme(self):
         self.theme_choice = theme.CHOICES[self.theme_name.get()]
         theme.save_choice(self.theme_choice)
-        theme.apply(self.root, self.theme_choice, [self.target], [self.source, self.notes])
+        self.apply_theme()
+
+    def help(self):
+        messagebox.showinfo("Ohje", HELP, parent=self.root)
 
     def toggle_list(self):
         # A hidden list still holds the order, so Ctrl+arrows keep working.
@@ -324,14 +404,26 @@ class ReviewWindow:
 
     def toggle_together(self):
         if self.together.get():
-            self.set_status("Toistot yhdessä: yksi rivi kutakin toistuvaa lähdettä kohden; muokkaus, hyväksyntä "
-                            "ja hylkäys koskevat kaikkia sen toistoja.")
+            self.set_status("Samat tekstit niputettu: muokkaus, hyväksyntä ja hylkäys koskevat koko nippua.")
         self.fill_list()
 
+    def differs(self, i):
+        """Whether the strings bundled with i have different translations now."""
+        return len({self.session.translation(j) for j in self.session.repeats[i]}) > 1
+
+    def members(self, chosen):
+        """The chosen strings, with their bundles when bundling is on."""
+        if not self.bundled():
+            return list(chosen)
+        out = []
+        for i in chosen:
+            out += [j for j in self.session.repeats[i] if j not in out]
+        return out
+
     def with_repeats(self, chosen):
-        """The chosen strings, and with "Toistot yhdessä" on their repeats too,
-        each given the translation of the chosen string it repeats."""
-        if not self.together.get():
+        """The chosen strings, and with bundling on their bundles too, each
+        given the translation of the chosen string it belongs with."""
+        if not self.bundled():
             return chosen, []
         out, copied = [], []
         for i in chosen:
@@ -340,6 +432,50 @@ class ReviewWindow:
             copied += self.session.copy_to_repeats(i)
             out += self.session.repeats[i]
         return out, copied
+
+    def remember(self, what, chosen):
+        """Keep the strings a decision is about to change, for undo()."""
+        self.undo_stack.append((what, self.session.snapshot(self.members(chosen))))
+
+    def undo(self):
+        if not self.undo_stack:
+            self.root.bell()
+            self.set_status("Ei kumottavaa.")
+            return
+        what, snapshot = self.undo_stack.pop()
+        self.session.restore(snapshot)
+        changed = [i for i, _ in snapshot]
+        self.current = None
+        self.fill_list()
+        first = next((i for i in changed if self.list.exists(str(i))), None)
+        if first is not None:
+            self.select(first)
+        self.flash(changed)
+        self.schedule_save()
+        self.set_status(f"Kumottu: {what}")
+
+    def on_target_undo(self, _event):
+        try:
+            typed = self.target.tk.call(self.target._w, "edit", "canundo")
+        except tk.TclError:
+            typed = False
+        if typed:
+            return None  # the text box undoes the typing itself
+        self.undo()
+        return "break"
+
+    def flash(self, indices):
+        """Mark the rows a decision changed for a moment."""
+        rows = [str(i) for i in indices if self.list.exists(str(i))]
+        for iid in rows:
+            self.list.item(iid, tags=("changed",))
+
+        def clear():
+            for iid in rows:
+                if self.list.exists(iid):
+                    self.list.item(iid, tags=())
+
+        self.root.after(FLASH_MS, clear)
 
     # The selected string
 
@@ -389,31 +525,40 @@ class ReviewWindow:
         chosen = self.selected() or ([self.current] if self.current is not None else [])
         if not chosen:
             return
+        if not any(self.session.units[i].target for i in chosen):
+            self.root.bell()
+            self.set_status("Tyhjää käännöstä ei voi hyväksyä.")
+            return
+        differing = self.bundled() and any(self.differs(i) for i in chosen)
+        if differing and any(self.differs(i) and self.session.translation(i) is None for i in chosen):
+            # The shown translation cannot be read as one run of text, so it
+            # cannot be shared; signing off differing translations would mislead.
+            self.root.bell()
+            self.set_status("Nippua ei hyväksytty: sen käännökset eroavat, eikä näytettyä muotoiltua käännöstä "
+                            "voi jakaa muille. Muokkaa käännös tai hyväksy jäsenet erikseen.")
+            return
+        self.remember(f"hyväksyntä ({len(self.members(chosen))})", chosen)
         group, copied = self.with_repeats(chosen)
         done = [i for i in group if self.session.approve(i)]
         skipped = len(group) - len(done)
-        if not done:
-            self.root.bell()
-            self.set_status("Tyhjää käännöstä ei voi hyväksyä.")
-            for i in copied:
-                self.refresh_row(i)
-            return
         move_to = self.after_selection(chosen, lambda i: self.session.kind(i) == OPEN and i not in group)
         self.decided(sorted(set(done + copied)), move_to)
-        if len(group) > 1 or skipped:
-            self.set_status(f"Hyväksytty {len(done)}" + (f", ohitettu {skipped} tyhjää" if skipped else "") + ".")
+        message = f"Hyväksytty {len(done)}" + (f", ohitettu {skipped} tyhjää" if skipped else "") + "."
+        if differing:
+            message += " Nipun käännökset erosivat; kaikki saivat näytetyn käännöksen. Kumoa: Ctrl+Z."
+        self.set_status(message)
 
     def reject(self):
         chosen = self.selected() or ([self.current] if self.current is not None else [])
         if not chosen:
             return
+        self.remember(f"hylkäys ({len(self.members(chosen))})", chosen)
         group, _ = self.with_repeats(chosen)
         move_to = self.after_selection(chosen, lambda i: i not in group)
         for i in group:
             self.session.reject(i)
         self.decided(group, move_to)
-        if len(group) > 1:
-            self.set_status(f"Hylätty {len(group)}.")
+        self.set_status(f"Hylätty {len(group)}.")
 
     def decided(self, changed, move_to):
         """Show the decisions on the changed strings, then move to move_to (or stay)."""
@@ -439,6 +584,7 @@ class ReviewWindow:
         elif gone:
             self.show(None)
             self.update_buttons()
+        self.flash(changed)
 
     # Saving
 
@@ -446,7 +592,7 @@ class ReviewWindow:
         if self.autosave_job:
             self.root.after_cancel(self.autosave_job)
         self.autosave_job = self.root.after(AUTOSAVE_MS, self.save)
-        self.set_status("Tallentamattomia muutoksia…")
+        self.saved.configure(text="Tallentamattomia muutoksia…")
 
     def save(self):
         if self.autosave_job:
@@ -455,9 +601,10 @@ class ReviewWindow:
         try:
             self.session.save()
         except Exception as error:
-            self.set_status(f"TALLENNUS EPÄONNISTUI: {error}")
+            self.saved.configure(text="TALLENNUS EPÄONNISTUI")
+            self.set_status(f"Tallennus epäonnistui: {error}")
             return False
-        self.set_status(f"Tallennettu klo {time.strftime('%H.%M.%S', self.session.saved_at)}")
+        self.saved.configure(text=f"Tallennettu klo {time.strftime('%H.%M.%S', self.session.saved_at)}")
         return True
 
     def set_status(self, text):

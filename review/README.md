@@ -40,13 +40,18 @@ virtaal-review = { git = "https://github.com/Hpartanen/virtaal", subdirectory = 
   next to each other. Rich-text sources show as their visible text.
 - Several selected strings (Shift/Ctrl-click, Ctrl+A) are approved or
   rejected at once; empty translations are skipped.
-- **Toistot yhdessä** (off by default): the list shows one row for each
+- **Niputa samat tekstit** (off by default): the list shows one row for each
   source that occurs several times, and an edit, approval or rejection there
   applies to every repeat. The × column shows how many there are, with "≠"
   when their translations differ now (a decision gives them all the shown
   one). A plain-text source and a rich-text one with the same visible text
   are not repeats of each other.
 - The list and the notes can be hidden.
+- **Kumoa** (Ctrl+Z) undoes the last approval or rejection, bundles and
+  copied translations included; in the translation box Ctrl+Z first undoes
+  typing. Changed rows flash briefly; the status line keeps the last action,
+  the save state and the counts apart. Buttons explain themselves on hover,
+  and F1 (or ?) lists the keys.
 - **Teema**: light, dark or the system's choice (the default), on the Sun
   Valley ttk theme (sv-ttk). The choice is kept in `virtaal-review.json`
   beside Virtaal's own settings.

@@ -184,3 +184,15 @@ def test_bundle_spans_plain_and_rich_text(tmp_path):
     assert s.units[0].target.startswith('<?xml version="1.0"?><body') and "<p>Venttiili &amp; co</p>" in s.units[0].target
     s.set_target(2, "<body>Y</body>")
     assert s.copy_to_repeats(2) == [3] and s.target(3) == "<body>Y</body>"
+
+
+def test_restore_puts_strings_back_exactly(basic):
+    s = ReviewSession(basic)
+    s.save()  # the serializer's own layout, to compare with
+    before = basic.read_bytes()
+    saved = s.snapshot([0, 1])
+    s.set_target(0, "Venttiilit"); s.approve(0); s.set_target(1, "Kanava"); s.reject(1)
+    s.restore(saved)
+    assert (s.target(0), s.kind(0), s.target(1), s.kind(1)) == ("Venttiili", OPEN, "", OPEN)
+    s.save()
+    assert basic.read_bytes() == before

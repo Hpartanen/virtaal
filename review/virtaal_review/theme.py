@@ -19,6 +19,8 @@ TEXT_COLOURS = {"light": ("#ffffff", "#f3f3f3", "#e0e0e0"), "dark": ("#2b2b2b", 
 # The selected list row, (background, text): sv-ttk's accent colour, as on its
 # check and radio buttons, so the row stands out with or without focus.
 SELECTED_ROW = {"light": ("#005fb8", "#ffffff"), "dark": ("#57c8ff", "#000000")}
+# Rows a decision just changed, for a moment.
+FLASH = {"light": "#fff1b8", "dark": "#5c4a00"}
 
 
 def system_mode():
