@@ -167,3 +167,20 @@ def test_copy_to_repeats(tmp_path):
 
 def test_plain_finds_markup_after_a_prefix():
     assert plain('[x] <?xml version="1.0"?><body xmlns="http://www.w3.org/1999/xhtml">A</body>') == "[x] A"
+
+
+def test_bundle_spans_plain_and_rich_text(tmp_path):
+    rich = '&lt;?xml version="1.0"?&gt;&lt;body xmlns="http://www.w3.org/1999/xhtml" style="a"&gt;&lt;p&gt;Ventil&lt;/p&gt;&lt;/body&gt;'
+    two_runs = '&lt;body xmlns="http://www.w3.org/1999/xhtml"&gt;&lt;p&gt;Ventil&lt;/p&gt;&lt;p&gt;x&lt;/p&gt;&lt;/body&gt;'
+    path = write(tmp_path, [unit("a", rich, rich.replace("Ventil", "[luonnos] Ventil")), unit("b", "Ventil", "Venttiili"),
+                            unit("c", two_runs), unit("d", two_runs)])
+    s = ReviewSession(path)
+    assert s.repeats[0] == s.repeats[1] == [1, 0]  # the plain-text member comes first
+    assert s.repeats[2] == s.repeats[3] == [2, 3]  # several runs: identical copies only
+    assert s.translation(0) == "[luonnos] Ventil"
+    s.set_target(1, "Venttiili & co")
+    assert s.copy_to_repeats(1) == [0]
+    assert s.translation(0) == "Venttiili & co"
+    assert s.units[0].target.startswith('<?xml version="1.0"?><body') and "<p>Venttiili &amp; co</p>" in s.units[0].target
+    s.set_target(2, "<body>Y</body>")
+    assert s.copy_to_repeats(2) == [3] and s.target(3) == "<body>Y</body>"

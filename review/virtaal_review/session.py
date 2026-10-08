@@ -114,6 +114,30 @@ def pattern(text):
     return re.sub(r"\d+(?:[.,]\d+)?", "#", plain(text).casefold())
 
 
+def _is_rich(text):
+    return (text or "").lstrip().startswith("<")
+
+
+def _text_run(markup):
+    """Rich text with exactly one run of visible text: (before, run, after); else None."""
+    parts = re.split(r"(<[^>]*>)", markup or "")
+    runs = [k for k, part in enumerate(parts) if not part.startswith("<") and part.strip()]
+    if len(runs) != 1:
+        return None
+    k = runs[0]
+    return "".join(parts[:k]), parts[k], "".join(parts[k + 1:])
+
+
+def _bundle_key(source):
+    """Strings with the same key read the same: plain text as it is, rich text
+    by its single run of visible text. Rich text with several runs cannot take
+    another string's translation safely, so it only bundles with identical copies."""
+    if not _is_rich(source):
+        return to_display(source).strip()
+    run = _text_run(source)
+    return html.unescape(run[1]).strip() if run else ("markup", source)
+
+
 SIMILARITY = 0.7  # SequenceMatcher ratio of two patterns; a judgment call, not measured
 
 
@@ -135,11 +159,14 @@ class ReviewSession:
         # Sources never change, so their list forms are worked out once.
         self.source_plain = [plain(u.source) for u in self.units]
         self.source_pattern = [pattern(u.source) for u in self.units]
-        # Strings with exactly the same source: each entry lists the whole group.
+        # Strings that read the same (see _bundle_key): each entry lists its whole
+        # bundle, a plain-text member first, since that one is shown and edited.
         groups = {}
         for i, u in enumerate(self.units):
-            groups.setdefault(u.source, []).append(i)
-        self.repeats = [groups[u.source] for u in self.units]
+            groups.setdefault(_bundle_key(u.source), []).append(i)
+        for members in groups.values():
+            members.sort(key=lambda j: (_is_rich(self.units[j].source), j))
+        self.repeats = [groups[_bundle_key(u.source)] for u in self.units]
         self.dirty = False
         self.saved_at = None
 
@@ -197,12 +224,42 @@ class ReviewSession:
         self.dirty = True
         return True
 
+    def translation(self, i):
+        """The translation as a reader sees it; for rich text the text inside
+        its markup, or None when that is not a single run of text."""
+        target = self.units[i].target
+        if not target:
+            return ""
+        if _is_rich(self.units[i].source):
+            run = _text_run(target)
+            return html.unescape(run[1]).strip() if run else None
+        return to_display(target)
+
+    def _give(self, j, text):
+        """Put a translation into string j; rich text keeps its markup."""
+        unit = self.units[j]
+        if text and _is_rich(unit.source):
+            before, _, after = _text_run(unit.target) or _text_run(unit.source)
+            text = before + html.escape(text, quote=False) + after
+        return self.set_target(j, text)
+
     def copy_to_repeats(self, i):
-        """Give string i's translation to the other strings with the same source.
+        """Give string i's translation to the other strings of its bundle.
 
         Returns the strings that changed; as with any edit, they become open.
         """
-        return [j for j in self.repeats[i] if j != i and self.set_target(j, self.target(i))]
+        text = self.translation(i)
+        changed = []
+        for j in self.repeats[i]:
+            if j == i:
+                continue
+            if self.units[j].source == self.units[i].source:
+                done = self.set_target(j, self.target(i))
+            else:
+                done = text is not None and self.translation(j) != text and self._give(j, text)
+            if done:
+                changed.append(j)
+        return changed
 
     def approve(self, i):
         """Sign the string off; an empty target cannot be approved."""

@@ -6,8 +6,8 @@ and on close.
 
 The list can be filtered (state, search text, strings like the selected one)
 and sorted; several selected strings can be approved or rejected at once.
-With "Toistot yhdessä" on, strings with exactly the same source share one
-translation and one decision.
+With "Toistot yhdessä" on, strings that read the same are bundled under one
+expandable row and share one translation and one decision.
 """
 import argparse
 import time
@@ -109,6 +109,8 @@ class ReviewWindow:
         for col, title, width, stretch in COLUMNS:
             self.list.heading(col, text=title, anchor="w", command=lambda col=col: self.sort_by(col))
             self.list.column(col, width=width, minwidth=30, stretch=stretch, anchor="w")
+        # The expand arrow of a bundle row, shown only while bundles are on.
+        self.list.column("#0", width=34, minwidth=34, stretch=False)
         scroll = ttk.Scrollbar(left, orient="vertical", command=self.list.yview)
         self.list.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
@@ -169,9 +171,13 @@ class ReviewWindow:
 
     def row(self, i):
         s = self.session
-        repeats = len(s.repeats[i])
-        return (i + 1, self.names[s.state_id(i)], repeats if repeats > 1 else "", s.source_plain[i],
-                plain(s.units[i].target))
+        repeats = s.repeats[i]
+        count = ""
+        if len(repeats) > 1:
+            # "≠": the repeats have different translations now; a decision
+            # with "Toistot yhdessä" on gives them all the shown one.
+            count = f"{len(repeats)} ≠" if len({s.target(j) for j in repeats}) > 1 else len(repeats)
+        return (i + 1, self.names[s.state_id(i)], count, s.source_plain[i], plain(s.units[i].target))
 
     def visible(self, i):
         wanted = dict(FILTERS)[self.filter.get()]
@@ -210,13 +216,35 @@ class ReviewWindow:
             arrow = (" ▼" if self.sort_reversed else " ▲") if col == self.sort_column else ""
             self.list.heading(col, text=title + arrow)
 
+    def bundled(self):
+        return self.together.get()
+
+    def bundle_visible(self, i):
+        """With bundles on, a bundle is listed while any of its strings passes the filters."""
+        return any(self.visible(j) for j in self.session.repeats[i])
+
+    def top(self, i):
+        """The list's top-level row for string i: its bundle row when bundled."""
+        parent = self.list.parent(str(i)) if self.list.exists(str(i)) else ""
+        return int(parent) if parent else i
+
     def fill_list(self):
         self.list.delete(*self.list.get_children())
-        rows = sorted((i for i in range(len(self.session)) if self.visible(i)), key=self.sort_key(),
-                      reverse=self.sort_reversed)
+        s = self.session
+        if self.bundled():
+            # One row per bundle (its first string), the others under it.
+            self.list.configure(show=("tree", "headings"))
+            rows = [i for i in range(len(s)) if s.repeats[i][0] == i and self.bundle_visible(i)]
+        else:
+            self.list.configure(show="headings")
+            rows = [i for i in range(len(s)) if self.visible(i)]
+        rows.sort(key=self.sort_key(), reverse=self.sort_reversed)
         self.update_headings()
         for i in rows:
             self.list.insert("", "end", iid=str(i), values=self.row(i))
+            if self.bundled():
+                for j in s.repeats[i][1:]:
+                    self.list.insert(str(i), "end", iid=str(j), values=self.row(j))
         self.update_counts()
         if self.current is not None and self.list.exists(str(self.current)):
             self.select(self.current)
@@ -296,8 +324,9 @@ class ReviewWindow:
 
     def toggle_together(self):
         if self.together.get():
-            self.set_status("Toistot yhdessä: muokkaus, hyväksyntä ja hylkäys koskevat kaikkia saman lähteen "
-                            "merkkijonoja.")
+            self.set_status("Toistot yhdessä: yksi rivi kutakin toistuvaa lähdettä kohden; muokkaus, hyväksyntä "
+                            "ja hylkäys koskevat kaikkia sen toistoja.")
+        self.fill_list()
 
     def with_repeats(self, chosen):
         """The chosen strings, and with "Toistot yhdessä" on their repeats too,
@@ -343,13 +372,14 @@ class ReviewWindow:
         rows = self.list.get_children()
         if not rows:
             return
-        here = rows.index(str(self.current)) if self.list.exists(str(self.current)) else -1
+        here = rows.index(str(self.top(self.current))) if self.current is not None and self.list.exists(
+            str(self.current)) else -1
         self.select(int(rows[max(0, min(len(rows) - 1, here + delta))]))
 
     def after_selection(self, chosen, wanted=lambda i: True):
         """The first row below the chosen ones, in list order, that passes wanted."""
         rows = [int(iid) for iid in self.list.get_children()]
-        listed = [rows.index(i) for i in chosen if self.list.exists(str(i))]
+        listed = [rows.index(self.top(i)) for i in chosen if self.list.exists(str(i))]
         if not listed:
             return None
         last = max(listed)
@@ -368,7 +398,7 @@ class ReviewWindow:
             for i in copied:
                 self.refresh_row(i)
             return
-        move_to = self.after_selection(group, lambda i: self.session.kind(i) == OPEN)
+        move_to = self.after_selection(chosen, lambda i: self.session.kind(i) == OPEN and i not in group)
         self.decided(sorted(set(done + copied)), move_to)
         if len(group) > 1 or skipped:
             self.set_status(f"Hyväksytty {len(done)}" + (f", ohitettu {skipped} tyhjää" if skipped else "") + ".")
@@ -378,7 +408,7 @@ class ReviewWindow:
         if not chosen:
             return
         group, _ = self.with_repeats(chosen)
-        move_to = self.after_selection(group)
+        move_to = self.after_selection(chosen, lambda i: i not in group)
         for i in group:
             self.session.reject(i)
         self.decided(group, move_to)
@@ -388,11 +418,17 @@ class ReviewWindow:
     def decided(self, changed, move_to):
         """Show the decisions on the changed strings, then move to move_to (or stay)."""
         self.schedule_save()
-        gone = [i for i in changed if not self.visible(i)]
+        if self.bundled():
+            # A bundle row goes when none of its strings passes the filters any more.
+            changed = sorted({self.session.repeats[i][0] for i in changed} | set(changed))
+            gone = [i for i in changed if self.list.exists(str(i)) and self.list.parent(str(i)) == ""
+                    and not self.bundle_visible(i)]
+        else:
+            gone = [i for i in changed if self.list.exists(str(i)) and not self.visible(i)]
         for i in changed:
             if i in gone:
                 self.list.delete(str(i))
-            else:
+            elif self.list.exists(str(i)):
                 self.refresh_row(i)
         self.update_counts()
         if move_to is None and gone:
