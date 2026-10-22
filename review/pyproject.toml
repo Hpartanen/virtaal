@@ -1,0 +1,34 @@
+[project]
+name = "virtaal-review"
+version = "0.1.0"
+description = "A small review window for XLIFF 1.2 on Virtaal's core, in Python and Tkinter only."
+readme = "README.md"
+license = "GPL-2.0-or-later"
+requires-python = ">=3.11"
+dependencies = [
+    "translate-toolkit==3.20.0",
+    "lxml==6.1.3",
+    "sv-ttk==2.6.1",
+]
+
+[project.scripts]
+virtaal-review = "virtaal_review.app:main"
+
+[dependency-groups]
+dev = ["pytest==9.1.1"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+# An installed copy has no checkout around it, so the wheel carries
+# Virtaal's own package, taken from this repository
+# at build time (a git install clones the whole repository).
+[tool.hatch.build.targets.wheel]
+packages = ["virtaal_review"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../virtaal" = "virtaal"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
