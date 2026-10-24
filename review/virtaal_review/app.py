@@ -491,8 +491,11 @@ class ReviewWindow:
         except tk.TclError:
             typed = False
         if typed:
-            return None  # the text box undoes the typing itself
-        self.undo()
+            # Undo the typing here and stop the key: letting it go on would
+            # also reach the window's Ctrl+Z and undo the last decision.
+            self.target.edit_undo()
+        else:
+            self.undo()
         return "break"
 
     def flash(self, indices):
